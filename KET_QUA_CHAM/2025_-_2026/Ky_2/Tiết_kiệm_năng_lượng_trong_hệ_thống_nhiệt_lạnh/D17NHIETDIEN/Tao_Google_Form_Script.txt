@@ -1,0 +1,22 @@
+function taoFormThi() {
+  var form = FormApp.create('Tiết kiệm năng lượng trong hệ thống nhiệt lạnh - D17NHIETDIEN - Bài kiểm tra số 2 - 13/04/2026');
+  form.setDescription('Sinh viên điền thông tin và chọn đáp án chính xác.\nLưu ý: Chỉ chọn 1 đáp án cho mỗi câu.');
+  form.addTextItem().setTitle('Họ và tên').setRequired(true);
+  form.addTextItem().setTitle('Mã sinh viên').setRequired(true);
+  form.addTextItem().setTitle('Mã đề').setRequired(true);
+  
+  var numQuestions = 100;
+  var choices = ['A', 'B', 'C', 'D'];
+  var gridItem = form.addCheckboxGridItem();
+  gridItem.setTitle('Phần trả lời (Chọn đáp án)');
+  
+  var rows = [];
+  for (var i = 1; i <= numQuestions; i++) {
+    rows.push('Câu ' + i);
+  }
+  gridItem.setRows(rows);
+  gridItem.setColumns(choices);
+  gridItem.setRequired(true);
+  
+  Logger.log('Tạo form thành công!');
+}

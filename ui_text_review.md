@@ -1,0 +1,190 @@
+# Danh sách Text Giao diện (UI Text List)
+
+Dưới đây là danh sách các chuỗi ký tự hiển thị trên giao diện được phân loại theo từng Module. Bạn có thể xem và đề xuất chỉnh sửa trực tiếp.
+
+## Module: `main.py`
+- [ ] Hệ thống Quản lý & Trộn đề thi EPU
+- [ ] 🎨 Giao diện
+- [ ] VuPQ | vupq@epu.edu.vn
+- [ ]  🏦 Ngân hàng 
+- [ ]  🔀 Trộn đề 
+- [ ]  📁 Quản lý đề 
+- [ ]  📈 Chấm điểm 
+
+## Module: `ngan_hang.py`
+- [ ] Quản lý File Word
+- [ ] 🔄 Làm mới
+- [ ] ➕ Thêm
+- [ ] ✏️ Đổi tên
+- [ ] 🔍 Kiểm tra
+- [ ] 👁️ Xem
+- [ ] ❌ Xóa
+- [ ] 📥 Xuất mẫu
+- [ ] Cơ sở dữ liệu
+- [ ] 💾 Import
+- [ ] 📂 Quản lý
+- [ ] 📊 Thống kê
+- [ ] 📝 Mở Word
+- [ ] 📂 Thư mục
+- [ ] Tên file ngân hàng (.docx)
+- [ ] KB
+- [ ] Lần sửa cuối
+- [ ] CSDL
+- [ ] Thông báo hệ thống
+- [ ] Sẵn sàng. Kéo thả file .docx vào danh sách để thêm nhanh.
+- [ ] Đang phân tích định dạng, vui lòng đợi...
+- [ ] Lỗi: Không thể tìm thấy hàm phân tích (split_questions_from_docx).
+- [ ] Đang xuất file theo mẫu EPU, vui lòng đợi...
+- [ ] Đang import vào cơ sở dữ liệu...
+- [ ] ID câu 1
+- [ ] File 1
+- [ ] Nội dung
+- [ ] ID câu 2
+- [ ] File 2
+- [ ] 📂 Ngân hàng
+- [ ] Môn học / File
+- [ ] ID
+- [ ] Câu
+- [ ] ❌ Xóa Ngân hàng
+- [ ] ➕ Soạn câu mới
+- [ ] ✏️ Sửa câu hỏi
+- [ ] 🗑️ Xóa Câu hỏi
+- [ ] Danh sách câu hỏi
+- [ ] Độ khó
+- [ ] Đ/A
+- [ ] Xem trước nội dung
+- [ ] Phân loại
+- [ ] Môn học:
+- [ ] Ngân hàng:
+- [ ] Độ khó:
+- [ ] Nội dung câu hỏi
+- [ ] 🖼️ Chèn Ảnh
+- [ ] ∑ Chèn LaTeX
+- [ ] (Ctrl+V để dán ảnh)
+- [ ] Các phương án trả lời (Chọn nút tròn cho đáp án đúng)
+- [ ] 🖼️
+- [ ] ∑
+- [ ] 💾 LƯU CÂU HỎI
+- [ ] ❌ Hủy bỏ
+- [ ] Lưu file xuất
+- [ ] Quản lý Ngân hàng trong CSDL
+
+## Module: `tron_de.py`
+- [ ] Thông tin đề
+- [ ] Ghi chú:
+- [ ] Cấu hình sinh đề
+- [ ] Nguồn câu hỏi:
+- [ ] File
+- [ ] Kho
+- [ ] CSDL
+- [ ] Chưa chọn file
+- [ ] 📋 Thiết lập Ma trận đề (Nhiều tệp)
+- [ ] 🎯 Chọn câu hỏi cụ thể
+- [ ] Loại file xuất:
+- [ ] Phương án:
+- [ ] Đảo thứ tự đáp án (A–D)
+- [ ] 🚀 Bắt đầu Trộn đề
+- [ ] 📝 Tạo Google Script Nhập liệu
+- [ ] Nhật ký
+- [ ] Quản lý các nguồn câu hỏi và số lượng cần lấy:
+- [ ] Tên file ngân hàng
+- [ ] Tổng số câu
+- [ ] Số câu cần lấy
+- [ ] ➕ Thêm file
+- [ ] 💾 Thêm từ CSDL
+- [ ] ✏️ Đổi số lượng
+- [ ] ❌ Xóa
+- [ ] ✅ Xác nhận ma trận
+- [ ] Chọn 1 file trong ngân hàng:
+- [ ] Chọn
+- [ ] Bộ lọc
+- [ ] Môn học:
+- [ ] Độ khó:
+- [ ] Từ khóa:
+- [ ] Ngân hàng đã import
+- [ ] ☑
+- [ ] Tên ngân hàng
+- [ ] Môn học
+- [ ] Tổng câu
+- [ ] Số lấy
+- [ ] Đang nạp câu hỏi từ CSDL...
+- [ ] Sẵn sàng
+- [ ] 🔍 Lọc
+- [ ] ☑ Chọn tất cả
+- [ ] ☐ Bỏ chọn tất cả
+- [ ] ✅ Nạp câu hỏi đã chọn
+- [ ] Chọn ngân hàng để thêm vào ma trận:
+- [ ] ✅ Thêm vào ma trận
+- [ ] Click vào [ ] để chọn/bỏ chọn.
+- [ ] Ghim
+- [ ] Nội dung câu hỏi
+- [ ] Chi tiết câu hỏi
+- [ ] Chọn tất cả
+- [ ] Bỏ chọn tất cả
+- [ ] Xác nhận
+- [ ] Hoàn tất.
+- [ ] Xác nhận thông tin cho Form:
+- [ ] Số lượng câu hỏi:
+- [ ] Tạo mã kịch bản (Script)
+- [ ] Thiết lập Ma trận đề
+
+## Module: `quan_ly_de.py`
+- [ ] 🔄 Làm mới
+- [ ] 📂 Xem thư mục
+- [ ] 🔍 Xem trước đề
+- [ ] 📝 Tổng hợp
+- [ ] 📊 Đáp án
+- [ ] 📋 Chi tiết
+- [ ] ❌ Xóa đợt này
+- [ ] Tên đợt trộn đề
+- [ ] Thời gian tạo
+- [ ] Số lượng file
+- [ ] Kích thước (MB)
+- [ ] Tổng hợp & Đáp án
+- [ ] CSDL
+- [ ] Chọn một mã đề cụ thể:
+- [ ] Xem
+- [ ] Chọn mã đề
+- [ ] Chi tiết đợt trộn đề (DB)
+
+## Module: `cham_diem.py`
+- [ ] Quản lý đợt thi
+- [ ] Nguồn dữ liệu
+- [ ] File đáp án:
+- [ ] File ngoài
+- [ ] Làm mới
+- [ ] Chưa chọn
+- [ ] File trả lời:
+- [ ] Chọn file trả lời
+- [ ] Tùy chọn chấm
+- [ ] Coi bỏ trống là sai
+- [ ] 🚀 Chấm điểm & Biểu đồ
+- [ ] Nhật ký
+- [ ] Chọn đợt trộn đề chứa đáp án:
+- [ ] Chọn
+- [ ] Tên môn học:
+- [ ] Lớp:
+- [ ] Bài kiểm tra số:
+- [ ] Ngày kiểm tra:
+- [ ] Số lượng câu hỏi:
+- [ ] Tạo mã tự động sinh Form
+- [ ] Bộ lọc
+- [ ] Năm học:
+- [ ] Học kỳ:
+- [ ] Môn học:
+- [ ] Thống kê tổng quan
+- [ ] ID
+- [ ] Họ và tên
+- [ ] MSSV
+- [ ] Môn học
+- [ ] Lớp
+- [ ] Năm học
+- [ ] HK
+- [ ] Mã đề
+- [ ] Điểm
+- [ ] Đúng
+- [ ] Sai
+- [ ] Ngày chấm
+- [ ] Chưa có dữ liệu
+- [ ] 🔍 Lọc
+

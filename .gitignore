@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+*.db
+*.sqlite
+
+# Distribution / Build
+dist/
+build/
+*.spec
+*.exe
+
+# Configuration
+config.json
+
+# Logs
+*.log
+
+# Media / Assets from runs
+NGAN_HANG_CAU_HOI/
+TRON_DE_KET_QUA/
+NGAN_HANG_VAT_LY/
+NGAN_HANG_THUY_LUC/
+media/
+temp/
