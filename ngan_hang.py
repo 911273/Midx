@@ -530,11 +530,11 @@ class BankManagerTab:
             stats = db.get_bank_stats()
             banks = db.get_all_banks()
             
-            msg = "📊 THỐNG KÊ NGÂN HÀNG CÂU HỎI\n"
+            msg = "📊 THỐNG KÊ KHO CÂU HỎI\n"
             msg += "=" * 40 + "\n"
-            msg += f"Tổng số file đã import: {stats['total_banks']}\n"
-            msg += f"Tổng số môn học: {stats['total_subjects']}\n"
-            msg += f"Tổng số câu hỏi: {stats['total_questions']}\n\n"
+            msg += f"Tổng số Ngân hàng môn học (Cấp 1): {stats['total_subjects']}\n"
+            msg += f"Tổng số File đề (Cấp 2): {stats['total_banks']}\n"
+            msg += f"Tổng số Câu hỏi (Cấp 3): {stats['total_questions']}\n\n"
             
             if stats.get("by_difficulty"):
                 msg += "Phân bố theo độ khó:\n"
@@ -542,11 +542,11 @@ class BankManagerTab:
                     msg += f"  [{diff}]: {count} câu\n"
             
             if banks:
-                msg += "\nDanh sách ngân hàng:\n"
+                msg += "\nDanh sách các File gần đây:\n"
                 for b in banks[:20]:
                     msg += f"  • {b['file_name']} ({b['total_questions']} câu"
                     if b.get('subject_name'):
-                        msg += f", Môn: {b['subject_name']}"
+                        msg += f", Ngân hàng: {b['subject_name']}"
                     msg += f", Import: {b['imported_at']})\n"
             
             # Hiển thị trong dialog
@@ -567,6 +567,7 @@ class ImportChoiceDialog:
         utils.setup_dialog(self.win, width_pct=0.4, height_pct=0.4, title="Lựa chọn Import", parent=parent)
         
         self.result = None
+        self.subjects = db.get_subjects()
         self.banks = db.get_all_banks()
         
         frm = ttk.Frame(self.win, padding=utils.PAD_L)
@@ -576,29 +577,43 @@ class ImportChoiceDialog:
         
         self.var_mode = tk.StringVar(value="new")
         
-        # --- Option 1: New Bank ---
-        rb_new = ttk.Radiobutton(frm, text="Tạo ngân hàng mới hoàn toàn", variable=self.var_mode, value="new", command=self._toggle)
+        # --- Option 1: To Subject (New or Existing) ---
+        rb_new = ttk.Radiobutton(frm, text="Chọn Ngân hàng môn học (Cấp 1)", variable=self.var_mode, value="new", command=self._toggle)
         rb_new.pack(anchor="w", pady=5)
         
         self.frm_new = ttk.Frame(frm)
         self.frm_new.pack(fill=tk.X, padx=25, pady=(0, 15))
-        ttk.Label(self.frm_new, text="Tên môn học (tùy chọn):").pack(side=tk.LEFT)
-        self.ent_subject = ttk.Entry(self.frm_new)
-        self.ent_subject.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ttk.Label(self.frm_new, text="Ngân hàng (Môn):").pack(side=tk.LEFT)
         
-        # --- Option 2: Append to existing ---
-        rb_append = ttk.Radiobutton(frm, text="Thêm câu hỏi vào ngân hàng có sẵn", variable=self.var_mode, value="append", command=self._toggle)
+        sub_names = [s["name"] for s in self.subjects]
+        self.cb_subject = ttk.Combobox(self.frm_new, values=sub_names)
+        self.cb_subject.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        if sub_names: self.cb_subject.set(sub_names[0])
+        
+        # --- Option 2: Append to existing Bank ---
+        rb_append = ttk.Radiobutton(frm, text="Gộp vào một File có sẵn (Cấp 2)", variable=self.var_mode, value="append", command=self._toggle)
         rb_append.pack(anchor="w", pady=5)
         
         self.frm_append = ttk.Frame(frm)
         self.frm_append.pack(fill=tk.X, padx=25, pady=(0, 15))
         
-        bank_labels = [f"{b['file_name']} ({b['total_questions']} câu - {b.get('subject_name', '')})" for b in self.banks]
-        self.cb_banks = ttk.Combobox(self.frm_append, values=bank_labels, state="readonly")
+        # Thêm lọc theo môn học cho phần Append
+        frm_app_filter = ttk.Frame(self.frm_append)
+        frm_app_filter.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(frm_app_filter, text="Chọn Ngân hàng:").pack(side=tk.LEFT)
+        
+        app_sub_names = ["Tất cả"] + sub_names
+        self.cb_append_subject = ttk.Combobox(frm_app_filter, values=app_sub_names, state="readonly")
+        self.cb_append_subject.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cb_append_subject.set("Tất cả")
+        self.cb_append_subject.bind("<<ComboboxSelected>>", lambda e: self._update_append_bank_list())
+        
+        self.cb_banks = ttk.Combobox(self.frm_append, values=[], state="readonly")
         self.cb_banks.pack(fill=tk.X, expand=True)
-        if self.banks:
-            self.cb_banks.current(0)
-        else:
+        
+        self._update_append_bank_list()
+        
+        if not self.banks:
             rb_append.configure(state="disabled")
             
         # --- Footer ---
@@ -610,25 +625,44 @@ class ImportChoiceDialog:
         
         self._toggle()
 
+    def _update_append_bank_list(self):
+        """Cập nhật danh sách ngân hàng dựa trên môn học đã chọn."""
+        s_filter = self.cb_append_subject.get()
+        if s_filter == "Tất cả":
+            self.filtered_banks = self.banks
+        else:
+            self.filtered_banks = [b for b in self.banks if b.get("subject_name") == s_filter]
+        
+        labels = [f"{b['file_name']} ({b['total_questions']} câu)" for b in self.filtered_banks]
+        self.cb_banks.configure(values=labels)
+        if labels:
+            self.cb_banks.current(0)
+            self.cb_banks.configure(state="readonly" if self.var_mode.get() == "append" else "disabled")
+        else:
+            self.cb_banks.set("Không có ngân hàng nào")
+            self.cb_banks.configure(state="disabled")
+
     def _toggle(self):
         m = self.var_mode.get()
         if m == "new":
-            self.ent_subject.configure(state="normal")
+            self.cb_subject.configure(state="normal")
+            self.cb_append_subject.configure(state="disabled")
             self.cb_banks.configure(state="disabled")
         else:
-            self.ent_subject.configure(state="disabled")
-            self.cb_banks.configure(state="normal")
+            self.cb_subject.configure(state="disabled")
+            self.cb_append_subject.configure(state="readonly")
+            self._update_append_bank_list() # Để nó tự động set state đúng cho cb_banks
 
     def _confirm(self):
         m = self.var_mode.get()
         if m == "append":
             idx = self.cb_banks.current()
-            if idx < 0:
+            if idx < 0 or not self.filtered_banks:
                 messagebox.showwarning("Cảnh báo", "Vui lòng chọn ngân hàng đích!")
                 return
-            self.result = {"mode": "append", "value": self.banks[idx]["id"]}
+            self.result = {"mode": "append", "value": self.filtered_banks[idx]["id"]}
         else:
-            self.result = {"mode": "new", "value": self.ent_subject.get().strip()}
+            self.result = {"mode": "new", "value": self.cb_subject.get().strip()}
         self.win.destroy()
 
     def check_duplicates(self):
@@ -701,12 +735,12 @@ class DatabaseManagerDialog:
         ttk.Button(frm_sub_btns, text="🗑️ Xóa Môn", command=self.delete_current_subject, bootstyle="link").pack(side=tk.LEFT, expand=True)
 
         self.bank_tree = ttk.Treeview(frm_left, columns=("id", "questions"), show="tree headings", selectmode="browse")
-        self.bank_tree.heading("#0", text="Môn học / File")
+        self.bank_tree.heading("#0", text="Ngân hàng (Môn) / File")
         self.bank_tree.heading("id", text="ID")
         self.bank_tree.heading("questions", text="Câu")
-        self.bank_tree.column("#0", width=220)
+        self.bank_tree.column("#0", width=250)
         self.bank_tree.column("id", width=35, anchor=tk.CENTER)
-        self.bank_tree.column("questions", width=45, anchor=tk.CENTER)
+        self.bank_tree.column("questions", width=55, anchor=tk.CENTER)
         
         self.bank_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb_b = ttk.Scrollbar(frm_left, orient="vertical", command=self.bank_tree.yview)
@@ -725,10 +759,10 @@ class DatabaseManagerDialog:
         frm_toolbar = ttk.Frame(frm_right)
         frm_toolbar.grid(row=0, column=0, sticky="ew", pady=2)
         
-        self.btn_del_bank = ttk.Button(frm_toolbar, text="❌ Xóa Ngân hàng", command=self.delete_bank, state="disabled")
+        self.btn_del_bank = ttk.Button(frm_toolbar, text="❌ Xóa File", command=self.delete_bank, state="disabled")
         self.btn_del_bank.pack(side=tk.LEFT, padx=2)
         
-        ttk.Button(frm_toolbar, text="🔗 Gộp Ngân hàng", command=self.merge_banks_ui).pack(side=tk.LEFT, padx=2)
+        ttk.Button(frm_toolbar, text="🔗 Gộp File", command=self.merge_banks_ui).pack(side=tk.LEFT, padx=2)
         ttk.Button(frm_toolbar, text="📄 Xuất Word", command=self.export_bank_db_to_word).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(frm_toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
@@ -741,6 +775,8 @@ class DatabaseManagerDialog:
         self.btn_edit_q.pack(side=tk.LEFT, padx=2)
         self.btn_move_q = ttk.Button(frm_toolbar, text="📦 Di chuyển", command=self.move_questions_ui, state="disabled")
         self.btn_move_q.pack(side=tk.LEFT, padx=2)
+        self.btn_batch_update = ttk.Button(frm_toolbar, text="📋 Cập nhật nhiều", command=self.batch_update_ui, state="disabled", bootstyle="info-outline")
+        self.btn_batch_update.pack(side=tk.LEFT, padx=2)
         self.btn_del_q = ttk.Button(frm_toolbar, text="🗑️ Xóa Câu", command=self.delete_question, state="disabled")
         self.btn_del_q.pack(side=tk.LEFT, padx=2)
         
@@ -762,27 +798,58 @@ class DatabaseManagerDialog:
         ttk.Button(frm_search, text="🪄 Kiểm tra CSDL", command=self.open_audit_center, bootstyle="danger").pack(side=tk.LEFT, padx=2)
         ttk.Button(frm_search, text="🛡️ Sao lưu DB", command=self.backup_db_ui, bootstyle="success-outline").pack(side=tk.LEFT, padx=2)
 
+        # Toolbar 3: Bộ lọc chi tiết
+        frm_filter = ttk.Frame(frm_right)
+        frm_filter.grid(row=2, column=0, sticky="ew", pady=2)
+
+        ttk.Label(frm_filter, text="🎯 Lọc:").pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(frm_filter, text="Độ khó:").pack(side=tk.LEFT, padx=2)
+        self.cb_filter_diff = ttk.Combobox(frm_filter, values=["Tất cả", "DỄ", "TB", "KHÓ", "KSC"], width=8, state="readonly")
+        self.cb_filter_diff.pack(side=tk.LEFT, padx=2)
+        self.cb_filter_diff.set("Tất cả")
+        self.cb_filter_diff.bind("<<ComboboxSelected>>", lambda e: self.apply_filter())
+
+        ttk.Label(frm_filter, text="Chương:").pack(side=tk.LEFT, padx=5)
+        self.cb_filter_chapter = ttk.Combobox(frm_filter, width=15, state="readonly")
+        self.cb_filter_chapter.pack(side=tk.LEFT, padx=2)
+        self.cb_filter_chapter.bind("<<ComboboxSelected>>", lambda e: self.apply_filter())
+
+        ttk.Label(frm_filter, text="Chủ đề:").pack(side=tk.LEFT, padx=5)
+        self.cb_filter_topic = ttk.Combobox(frm_filter, width=20)
+        self.cb_filter_topic.pack(side=tk.LEFT, padx=2)
+        self.cb_filter_topic.bind("<Return>", lambda e: self.apply_filter())
+        
+        ttk.Button(frm_filter, text="Lọc", command=self.apply_filter, bootstyle="info-outline").pack(side=tk.LEFT, padx=5)
+        ttk.Button(frm_filter, text="Xóa lọc", command=self.clear_filter, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=2)
+
         # Danh sách câu hỏi
         frm_q_list = ttk.LabelFrame(frm_right, text="Danh sách câu hỏi (Giữ Ctrl/Shift để chọn nhiều)")
-        frm_q_list.grid(row=2, column=0, sticky="nsew", pady=5)
+        frm_q_list.grid(row=3, column=0, sticky="nsew", pady=5)
         frm_q_list.rowconfigure(0, weight=1)
         frm_q_list.columnconfigure(0, weight=1)
 
-        cols = ("id", "qid", "stem", "diff", "correct", "bank")
+        cols = ("id", "qid", "stem", "diff", "chapter", "topic", "correct", "bank")
         self.q_tree = ttk.Treeview(frm_q_list, columns=cols, show="headings", selectmode="extended")
         self.q_tree.heading("id", text="ID")
         self.q_tree.heading("qid", text="Câu")
         self.q_tree.heading("stem", text="Nội dung")
         self.q_tree.heading("diff", text="Độ khó")
+        self.q_tree.heading("chapter", text="Chương")
+        self.q_tree.heading("topic", text="Chủ đề")
         self.q_tree.heading("correct", text="Đ/A")
         self.q_tree.heading("bank", text="Ngân hàng")
+
         
         self.q_tree.column("id", width=40, anchor=tk.CENTER)
         self.q_tree.column("qid", width=40, anchor=tk.CENTER)
-        self.q_tree.column("stem", width=450, anchor=tk.W)
+        self.q_tree.column("stem", width=350, anchor=tk.W)
         self.q_tree.column("diff", width=50, anchor=tk.CENTER)
+        self.q_tree.column("chapter", width=60, anchor=tk.CENTER)
+        self.q_tree.column("topic", width=100, anchor=tk.W)
         self.q_tree.column("correct", width=35, anchor=tk.CENTER)
-        self.q_tree.column("bank", width=150, anchor=tk.W)
+        self.q_tree.column("bank", width=120, anchor=tk.W)
+
         
         self.q_tree.grid(row=0, column=0, sticky="nsew")
         vsb_q = ttk.Scrollbar(frm_q_list, orient="vertical", command=self.q_tree.yview)
@@ -792,7 +859,7 @@ class DatabaseManagerDialog:
 
         # Preview Pane
         frm_preview = ttk.LabelFrame(frm_right, text="Xem trước nội dung")
-        frm_preview.grid(row=3, column=0, sticky="nsew", pady=5)
+        frm_preview.grid(row=4, column=0, sticky="nsew", pady=5)
         
         self.txt_preview = tk.Text(frm_preview, wrap="word", font=("Arial", 11), state="disabled")
         self.txt_preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -820,7 +887,13 @@ class DatabaseManagerDialog:
         self.btn_del_bank.config(state="disabled")
         self.btn_edit_q.config(state="disabled")
         self.btn_move_q.config(state="disabled")
+        self.btn_batch_update.config(state="disabled")
         self.btn_del_q.config(state="disabled")
+        
+        self.cb_filter_chapter.config(values=[])
+        self.cb_filter_chapter.set("")
+        self.cb_filter_topic.config(values=[])
+        self.cb_filter_topic.set("")
 
         try:
             banks = db.get_all_banks()
@@ -843,9 +916,11 @@ class DatabaseManagerDialog:
             
             # Hiển thị lên cây
             for sname in sorted(subjects_map.keys()):
-                sid = self.bank_tree.insert("", "end", text=sname, open=True)
-                for b in subjects_map[sname]:
-                    self.bank_tree.insert(sid, "end", text=b["file_name"], values=(b["id"], b["total_questions"]))
+                sub_banks = subjects_map[sname]
+                s_total = sum(b["total_questions"] for b in sub_banks)
+                sid = self.bank_tree.insert("", "end", text=f"📂 {sname}", open=True, values=("", s_total))
+                for b in sub_banks:
+                    self.bank_tree.insert(sid, "end", text=f"   📄 {b['file_name']}", values=(b["id"], b["total_questions"]))
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể nạp dữ liệu: {e}")
 
@@ -861,12 +936,62 @@ class DatabaseManagerDialog:
         
         self.current_bank_id = item["values"][0]
         self.btn_del_bank.config(state="normal")
+        self.update_filter_options(self.current_bank_id)
         self.load_questions(self.current_bank_id)
+
+    def update_filter_options(self, bank_id=None):
+        """Cập nhật danh sách Chương/Chủ đề cho bộ lọc."""
+        try:
+            data = db.get_bank_chapters_and_topics(bank_id)
+            chapters = ["Tất cả"] + data["chapters"]
+            topics = ["Tất cả"] + data["topics"]
+            
+            self.cb_filter_chapter.config(values=chapters)
+            self.cb_filter_chapter.set("Tất cả")
+            
+            self.cb_filter_topic.config(values=topics)
+            self.cb_filter_topic.set("Tất cả")
+        except: pass
+
+    def apply_filter(self):
+        """Áp dụng bộ lọc hiện tại."""
+        if self.current_bank_id:
+            self.load_questions(self.current_bank_id)
+        else:
+            self.global_search()
+
+    def clear_filter(self):
+        """Xóa trắng bộ lọc."""
+        self.cb_filter_diff.set("Tất cả")
+        self.cb_filter_chapter.set("Tất cả")
+        self.cb_filter_topic.set("Tất cả")
+        self.ent_search.delete(0, tk.END)
+        self.apply_filter()
 
     def load_questions(self, bank_id):
         self.q_tree.delete(*self.q_tree.get_children())
+        
+        # Lấy giá trị lọc
+        diff = self.cb_filter_diff.get()
+        if diff == "Tất cả": diff = ""
+        
+        ch = self.cb_filter_chapter.get()
+        if ch == "Tất cả": ch = ""
+        
+        tp = self.cb_filter_topic.get()
+        if tp == "Tất cả": tp = ""
+        
+        kw = self.ent_search.get().strip()
+
         try:
-            questions = db.search_questions(bank_id=bank_id, limit=1000)
+            questions = db.search_questions(
+                bank_id=bank_id, 
+                diff_code=diff, 
+                chapter=ch, 
+                topic=tp,
+                keyword=kw,
+                limit=1000
+            )
             for q in questions:
                 correct_label = ""
                 for opt in q.get("options", []):
@@ -876,24 +1001,40 @@ class DatabaseManagerDialog:
                 stem_preview = q.get("stem_text", "").strip()[:80]
                 self.q_tree.insert("", "end", values=(
                     q["id"], q.get("qid_in_file", ""), stem_preview, 
-                    q.get("diff_code", ""), correct_label, q.get("file_name", "")
+                    q.get("diff_code", ""), q.get("chapter", ""), q.get("topic", ""),
+                    correct_label, q.get("file_name", "")
                 ))
+
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể nạp câu hỏi: {e}")
 
     def global_search(self):
         """Tìm kiếm câu hỏi trên toàn bộ CSDL."""
         kw = self.ent_search.get().strip()
-        if not kw:
-            if self.current_bank_id: self.load_questions(self.current_bank_id)
+        
+        # Thậm chí không có keyword nhưng có lọc thì vẫn cho search toàn cục
+        diff = self.cb_filter_diff.get()
+        if diff == "Tất cả": diff = ""
+        ch = self.cb_filter_chapter.get()
+        if ch == "Tất cả": ch = ""
+        tp = self.cb_filter_topic.get()
+        if tp == "Tất cả": tp = ""
+
+        if not any([kw, diff, ch, tp]) and not self.current_bank_id:
             return
             
         self.q_tree.delete(*self.q_tree.get_children())
-        self.current_bank_id = None
-        self.btn_del_bank.config(state="disabled")
+        # self.current_bank_id = None # Giữ lại bank nếu đang chọn
         
         try:
-            questions = db.search_questions(keyword=kw, limit=500)
+            questions = db.search_questions(
+                bank_id=self.current_bank_id,
+                keyword=kw, 
+                diff_code=diff,
+                chapter=ch,
+                topic=tp,
+                limit=500
+            )
             if not questions:
                 messagebox.showinfo("Tìm kiếm", f"Không tìm thấy câu hỏi nào với từ khóa: '{kw}'")
                 return
@@ -907,8 +1048,10 @@ class DatabaseManagerDialog:
                 stem_preview = q.get("stem_text", "").strip()[:80]
                 self.q_tree.insert("", "end", values=(
                     q["id"], q.get("qid_in_file", ""), stem_preview, 
-                    q.get("diff_code", ""), correct_label, q.get("file_name", "")
+                    q.get("diff_code", ""), q.get("chapter", ""), q.get("topic", ""),
+                    correct_label, q.get("file_name", "")
                 ))
+
         except Exception as e:
             messagebox.showerror("Lỗi", str(e))
 
@@ -922,6 +1065,7 @@ class DatabaseManagerDialog:
         
         self.btn_edit_q.config(state="normal")
         self.btn_move_q.config(state="normal")
+        self.btn_batch_update.config(state="normal" if len(sel) > 1 else "disabled")
         self.btn_del_q.config(state="normal")
         
         if len(sel) == 1:
@@ -942,7 +1086,13 @@ class DatabaseManagerDialog:
             self.txt_preview.delete("1.0", tk.END)
             self.preview_images.clear()
 
-            self.txt_preview.insert(tk.END, f"Câu {q.get('qid_in_file', '')} [ID: {q_id}] [Độ khó: {q.get('diff_code') or 'N/A'}]\n\n", "bold_header")
+            title = f"Câu {q.get('qid_in_file', '')} [ID: {q_id}] [Độ khó: {q.get('diff_code') or 'N/A'}]"
+            if q.get("chapter"): title += f" [{q['chapter']}]"
+            if q.get("topic"): title += f" ({q['topic']})"
+            title += "\n\n"
+            
+            self.txt_preview.insert(tk.END, title, "bold_header")
+
 
             # Render Stem
             if q.get("stem_media_spans"):
@@ -1064,6 +1214,14 @@ class DatabaseManagerDialog:
         dlg = MoveQuestionsDialog(self.dlg, q_ids, on_success=self.refresh_after_edit)
         self.dlg.wait_window(dlg.win)
 
+    def batch_update_ui(self):
+        """Mở dialog cập nhật hàng loạt cho các câu hỏi đang chọn."""
+        sel = self.q_tree.selection()
+        if not sel: return
+        q_ids = [self.q_tree.item(s)["values"][0] for s in sel]
+        
+        BatchUpdateDialog(self.dlg, q_ids, on_success=self.refresh_after_edit)
+
     def merge_banks_ui(self):
         """Mở dialog gộp ngân hàng."""
         dlg = MergeBanksDialog(self.dlg, on_success=self.refresh_all)
@@ -1151,6 +1309,9 @@ class DatabaseManagerDialog:
             subj_node = sel[0]
 
         old_name = item["text"]
+        if "📂 " in old_name:
+            old_name = old_name.replace("📂 ", "")
+            
         if old_name == "Chưa phân loại": return
         
         new_name = simpledialog.askstring("Đổi tên Môn học", f"Nhập tên mới cho môn '{old_name}':", initialvalue=old_name)
@@ -1178,6 +1339,9 @@ class DatabaseManagerDialog:
             item = self.bank_tree.item(parent)
         
         subj_name = item["text"]
+        if "📂 " in subj_name:
+            subj_name = subj_name.replace("📂 ", "")
+            
         if subj_name == "Chưa phân loại": return
 
         if messagebox.askyesno("Xác nhận", f"Xóa môn học '{subj_name}'?\nLưu ý: Các ngân hàng thuộc môn này sẽ bị mất liên kết môn học (nhưng không bị xóa câu hỏi)."):
@@ -1189,6 +1353,73 @@ class DatabaseManagerDialog:
                     self.refresh_all()
             except Exception as e:
                 messagebox.showerror("Lỗi", str(e))
+
+
+class BatchUpdateDialog:
+    def __init__(self, parent, question_ids, on_success=None):
+        self.question_ids = question_ids
+        self.on_success = on_success
+        self.win = tk.Toplevel(parent)
+        utils.setup_dialog(self.win, width_pct=0.35, height_pct=0.45, title="Cập nhật hàng loạt", parent=parent)
+        
+        frm = ttk.Frame(self.win, padding=20)
+        frm.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frm, text=f"Đang cập nhật {len(question_ids)} câu hỏi đã chọn:", font=utils.FONT_BOLD).pack(pady=(0, 15))
+        
+        # --- Chapter ---
+        self.var_ch_en = tk.BooleanVar(value=False)
+        frm_ch = ttk.Frame(frm)
+        frm_ch.pack(fill=tk.X, pady=5)
+        ttk.Checkbutton(frm_ch, text="Chương:", variable=self.var_ch_en, command=self._toggle).pack(side=tk.LEFT)
+        self.ent_ch = ttk.Entry(frm_ch)
+        self.ent_ch.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # --- Difficulty ---
+        self.var_diff_en = tk.BooleanVar(value=False)
+        frm_diff = ttk.Frame(frm)
+        frm_diff.pack(fill=tk.X, pady=5)
+        ttk.Checkbutton(frm_diff, text="Độ khó:", variable=self.var_diff_en, command=self._toggle).pack(side=tk.LEFT)
+        self.cb_diff = ttk.Combobox(frm_diff, values=["DỄ", "TB", "KHÓ", "KSC"], state="readonly")
+        self.cb_diff.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cb_diff.set("TB")
+
+        # --- Topic ---
+        self.var_topic_en = tk.BooleanVar(value=False)
+        frm_topic = ttk.Frame(frm)
+        frm_topic.pack(fill=tk.X, pady=5)
+        ttk.Checkbutton(frm_topic, text="Chủ đề:", variable=self.var_topic_en, command=self._toggle).pack(side=tk.LEFT)
+        self.ent_topic = ttk.Entry(frm_topic)
+        self.ent_topic.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self._toggle()
+        
+        frm_btn = ttk.Frame(frm)
+        frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(20,0))
+        ttk.Button(frm_btn, text="✅ Xác nhận cập nhật", command=self._confirm, bootstyle="success").pack(side=tk.RIGHT, padx=5)
+        ttk.Button(frm_btn, text="❌ Hủy", command=self.win.destroy).pack(side=tk.RIGHT)
+
+    def _toggle(self):
+        self.ent_ch.configure(state="normal" if self.var_ch_en.get() else "disabled")
+        self.cb_diff.configure(state="readonly" if self.var_diff_en.get() else "disabled")
+        self.ent_topic.configure(state="normal" if self.var_topic_en.get() else "disabled")
+
+    def _confirm(self):
+        ch = self.ent_ch.get().strip() if self.var_ch_en.get() else None
+        df = self.cb_diff.get() if self.var_diff_en.get() else None
+        tp = self.ent_topic.get().strip() if self.var_topic_en.get() else None
+        
+        if not any([self.var_ch_en.get(), self.var_diff_en.get(), self.var_topic_en.get()]):
+            messagebox.showwarning("Cảnh báo", "Vui lòng chọn ít nhất một trường để cập nhật!")
+            return
+            
+        try:
+            db.batch_update_questions(self.question_ids, chapter=ch, diff_code=df, topic=tp)
+            messagebox.showinfo("Thành công", f"Đã cập nhật xong {len(self.question_ids)} câu hỏi.")
+            if self.on_success: self.on_success()
+            self.win.destroy()
+        except Exception as e:
+            messagebox.showerror("Lỗi", str(e))
 
 
 class MoveQuestionsDialog:

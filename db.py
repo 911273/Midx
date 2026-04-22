@@ -81,12 +81,14 @@ def init_db(db_path: str = None):
             stem_spans_json TEXT DEFAULT '[]',
             stem_extra_spans_json TEXT DEFAULT '[]',
             diff_code TEXT DEFAULT '',
+            chapter TEXT DEFAULT '',
+            topic TEXT DEFAULT '',
             content_hash TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
             FOREIGN KEY (bank_id) REFERENCES question_banks(id) ON DELETE CASCADE
         );
 
-        -- Phương án trả lời
+
         CREATE TABLE IF NOT EXISTS question_options (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             question_id INTEGER NOT NULL,
@@ -96,6 +98,12 @@ def init_db(db_path: str = None):
             is_correct INTEGER DEFAULT 0,
             FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
         );
+
+        -- Index cho hiệu năng tìm kiếm
+        CREATE INDEX IF NOT EXISTS idx_questions_bank ON questions(bank_id);
+        CREATE INDEX IF NOT EXISTS idx_questions_diff ON questions(diff_code);
+        CREATE INDEX IF NOT EXISTS idx_questions_ch ON questions(chapter);
+        CREATE INDEX IF NOT EXISTS idx_q_options_qid ON question_options(question_id);
 
         CREATE TABLE IF NOT EXISTS exam_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,6 +189,9 @@ def init_db(db_path: str = None):
         CREATE INDEX IF NOT EXISTS idx_grading_year ON grading_results(school_year);
         CREATE INDEX IF NOT EXISTS idx_grading_subject ON grading_results(subject);
         CREATE INDEX IF NOT EXISTS idx_grading_class ON grading_results(class_name);
+        CREATE INDEX IF NOT EXISTS idx_grading_class ON grading_results(class_name);
+
+
         """)
 
     # Migration: Thêm cột google_form_link vào bảng exam_sessions nếu chưa có
@@ -189,6 +200,24 @@ def init_db(db_path: str = None):
             conn.execute("ALTER TABLE exam_sessions ADD COLUMN google_form_link TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass # Cột đã tồn tại
+
+    # Migration: Thêm cột chapter và topic vào bảng questions nếu chưa có
+    for col in ["chapter", "topic"]:
+        try:
+            with get_connection(db_path) as conn:
+                conn.execute(f"ALTER TABLE questions ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+
+    # Sau khi đã có cột, tạo Index
+    try:
+        with get_connection(db_path) as conn:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_chapter ON questions(chapter)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_topic ON questions(topic)")
+    except sqlite3.OperationalError:
+        pass
+
+
 
 
 # ============= SERIALIZE / DESERIALIZE SPANS =============
@@ -468,11 +497,13 @@ def _add_questions_to_bank_internal(conn, bank_id: int, questions: List[Dict]) -
         # Insert câu hỏi
         cur_q = conn.execute(
             """INSERT INTO questions 
-               (bank_id, qid_in_file, stem_text, stem_spans_json, stem_extra_spans_json, diff_code, content_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (bank_id, qid_in_file, stem_text, stem_spans_json, stem_extra_spans_json, 
+                diff_code, chapter, topic, content_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (bank_id, current_max_qid, stem_text, stem_spans_json, stem_extra_json,
-             q.get("diff_code", ""), content_hash)
+             q.get("diff_code", ""), q.get("chapter", ""), q.get("topic", ""), content_hash)
         )
+
         q_id = cur_q.lastrowid
         existing_hashes.add(content_hash)
 
@@ -554,7 +585,7 @@ def check_sync_status(file_path: str) -> Dict[str, Any]:
 
 # ============= TRA CỨU CÂU HỎI =============
 def search_questions(keyword: str = "", diff_code: str = "", subject_name: str = "",
-                     bank_id: int = None, limit: int = 100) -> List[Dict]:
+                     bank_id: int = None, chapter: str = "", topic: str = "", limit: int = 100) -> List[Dict]:
     """Tìm kiếm câu hỏi trong DB."""
     conditions = []
     params = []
@@ -565,6 +596,12 @@ def search_questions(keyword: str = "", diff_code: str = "", subject_name: str =
     if diff_code:
         conditions.append("q.diff_code = ?")
         params.append(diff_code)
+    if chapter:
+        conditions.append("q.chapter = ?")
+        params.append(chapter)
+    if topic:
+        conditions.append("q.topic LIKE ?")
+        params.append(f"%{topic}%")
     if subject_name:
         conditions.append("s.name LIKE ?")
         params.append(f"%{subject_name}%")
@@ -584,21 +621,59 @@ def search_questions(keyword: str = "", diff_code: str = "", subject_name: str =
         ORDER BY q.id DESC
         LIMIT ?
         """
+
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
 
         results = []
+        if not rows:
+            return results
+
+        # Tối ưu hóa: Lấy toàn bộ options của danh sách câu hỏi trong 1 lần query (Tránh N+1)
+        q_ids = [r["id"] for r in rows]
+        placeholders = ",".join(["?"] * len(q_ids))
+        all_opts = conn.execute(
+            f"SELECT * FROM question_options WHERE question_id IN ({placeholders}) ORDER BY question_id, label",
+            q_ids
+        ).fetchall()
+
+        # Group options theo question_id
+        opts_map = {}
+        for opt in all_opts:
+            qid = opt["question_id"]
+            if qid not in opts_map:
+                opts_map[qid] = []
+            opts_map[qid].append(dict(opt))
+
         for r in rows:
             q_dict = dict(r)
-            # Lấy options
-            opts = conn.execute(
-                "SELECT * FROM question_options WHERE question_id = ? ORDER BY label",
-                (q_dict["id"],)
-            ).fetchall()
-            q_dict["options"] = [dict(o) for o in opts]
+            q_dict["options"] = opts_map.get(q_dict["id"], [])
             results.append(q_dict)
 
         return results
+
+
+def get_bank_chapters_and_topics(bank_id: int = None) -> Dict[str, List[str]]:
+    """Lấy danh sách các Chương và Chủ đề hiện có trong ngân hàng (hoặc toàn DB)."""
+    where_clause = "WHERE bank_id = ?" if bank_id else ""
+    params = (bank_id,) if bank_id else ()
+    
+    with get_connection() as conn:
+        # Lấy Chapters
+        ch_rows = conn.execute(
+            f"SELECT DISTINCT chapter FROM questions {where_clause} ORDER BY chapter",
+            params
+        ).fetchall()
+        chapters = [r["chapter"] for r in ch_rows if r["chapter"]]
+        
+        # Lấy Topics
+        tp_rows = conn.execute(
+            f"SELECT DISTINCT topic FROM questions {where_clause} ORDER BY topic",
+            params
+        ).fetchall()
+        topics = [r["topic"] for r in tp_rows if r["topic"]]
+        
+        return {"chapters": chapters, "topics": topics}
 
 
 def get_question_with_spans(question_id: int) -> Optional[Dict]:
@@ -626,7 +701,33 @@ def get_question_with_spans(question_id: int) -> Optional[Dict]:
                 q["correct_index"] = i
             q["options"].append(opt_dict)
 
-        return q
+
+def batch_update_questions(question_ids, chapter=None, diff_code=None, topic=None):
+    """Cập nhật hàng loạt các trường thông tin cho danh sách câu hỏi."""
+    if not question_ids:
+        return
+    
+    updates = []
+    params = []
+    if chapter is not None:
+        updates.append("chapter = ?")
+        params.append(chapter)
+    if diff_code is not None:
+        updates.append("diff_code = ?")
+        params.append(diff_code)
+    if topic is not None:
+        updates.append("topic = ?")
+        params.append(topic)
+    
+    if not updates:
+        return
+
+    # Chuẩn bị SQL động
+    sql = f"UPDATE questions SET {', '.join(updates)} WHERE id IN ({','.join(['?']*len(question_ids))})"
+    params.extend(question_ids)
+    
+    with get_connection() as conn:
+        conn.execute(sql, params)
 
 
 def get_bank_stats(bank_id: int = None) -> Dict[str, Any]:

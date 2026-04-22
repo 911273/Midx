@@ -372,10 +372,34 @@ def split_questions_from_docx(docx_path: str, num_options: int = DEFAULT_NUM_OPT
     questions = []
     warnings = []
     i = 0
+    current_chapter = ""
     while i < n:
-        qid, diff_code, stem_text = utils.parse_question_header(paras[i].text)
+
+        text = (paras[i].text or "").strip()
+        
+        # 1. Kiểm tra xem có phải tiêu đề Chương không?
+        ch_match = utils.CHAPTER_HEADER_PAT.match(text)
+        if ch_match:
+            # Ví dụ: [(<003734_C1>)] Chương 1 Lý thuyết
+            # Group 1: 1, Group 2: Chương 1 Lý thuyết
+            ch_num = ch_match.group(1)
+            ch_title = ch_match.group(2).strip()
+            current_chapter = f"C{ch_num}: {ch_title}"
+            i += 1
+            continue
+
+        # 2. Kiểm tra xem có phải tiêu đề Câu hỏi không?
+        qid, meta, stem_text = utils.parse_question_header(text)
         if qid is None:
             i += 1; continue
+
+        
+        diff_code = meta.get("diff", "")
+        # Ưu tiên chương từ tiêu đề câu hỏi [C1], nếu không lấy chương từ header [(<..._C1>)]
+        chapter = meta.get("chapter", "") or current_chapter
+        topic = meta.get("topic", "")
+
+
 
         stem_para_idx = i
         stem_extra_idxs: List[int] = []
@@ -438,6 +462,8 @@ def split_questions_from_docx(docx_path: str, num_options: int = DEFAULT_NUM_OPT
         questions.append({
             "qid": qid,
             "diff_code": diff_code,
+            "chapter": chapter,
+            "topic": topic,
             "stem_para_idx": stem_para_idx,
             "stem_text": final_stem_text,
             "stem_media_spans": stem_media_spans,
@@ -447,6 +473,7 @@ def split_questions_from_docx(docx_path: str, num_options: int = DEFAULT_NUM_OPT
             ],
             "correct_index": int(correct_pick)
         })
+
 
     return questions, doc, warnings
 
@@ -473,16 +500,36 @@ def add_info_line_with_leaders(doc, exam_code: int, tab1=4200, tab2=8200, tab3=9
     r = p.add_run(f"Mã đề: {exam_code}"); utils.set_run_font(r, 'Times New Roman'); r.bold = True; r.font.size = Pt(11)
 
 def add_header_2cols(doc: Document, school: str, faculty: str, exam_title: str, school_year: str,
-                     subject: str, duration_text: str, exam_code: int):
-    tbl = doc.add_table(rows=1, cols=2); utils.remove_table_borders(tbl); tbl.autofit = True
+                     subject: str, duration_text: str, exam_code: int, qr_data: str = None):
+    tbl = doc.add_table(rows=1, cols=3 if qr_data else 2)
+    tbl.autofit = True; utils.remove_table_borders(tbl)
+    
+    # Cột 1: Thông tin trường/khoa
     left = tbl.cell(0, 0); lp = left.paragraphs[0]; lp.text = ""
-    utils.add_styled_text(lp,  school,  size=13, bold=False, uppercase=True,  align=WD_ALIGN_PARAGRAPH.CENTER)
-    lp2 = left.add_paragraph(); utils.add_styled_text(lp2, faculty, size=12, bold=True, uppercase=True, align=WD_ALIGN_PARAGRAPH.CENTER)
-    right = tbl.cell(0, 1); rp = right.paragraphs[0]; rp.text = ""
-    utils.add_styled_text(rp,  exam_title,                size=13, bold=True, uppercase=True,  align=WD_ALIGN_PARAGRAPH.CENTER)
-    rp2 = right.add_paragraph(); utils.add_styled_text(rp2, f"NĂM HỌC {school_year}", size=12, bold=True, uppercase=True, align=WD_ALIGN_PARAGRAPH.CENTER)
-    rp3 = right.add_paragraph(); utils.add_styled_text(rp3, f"Môn: {subject}",        size=12, bold=True, uppercase=False, align=WD_ALIGN_PARAGRAPH.CENTER)
-    rp4 = right.add_paragraph(); utils.add_styled_text(rp4, duration_text,            size=11, bold=False, italic=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    utils.add_styled_text(lp,  school,  size=11, bold=False, uppercase=True,  align=WD_ALIGN_PARAGRAPH.CENTER)
+    lp2 = left.add_paragraph(); utils.add_styled_text(lp2, faculty, size=11, bold=True, uppercase=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    
+    # Cột 2 (hoặc 3): QR Code
+    if qr_data:
+        qr_cell = tbl.cell(0, 1)
+        qr_blob = generate_qr_code(qr_data)
+        if qr_blob:
+            # Chèn QR Code nhỏ gọn (2cm)
+            utils.append_image(qr_cell.paragraphs[0], qr_blob, width_cm=1.8)
+            qr_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Chuyển cột thông tin bài thi sang cột 3
+        right_idx = 2
+    else:
+        right_idx = 1
+
+    # Cột thông tin bài thi (phải)
+    right = tbl.cell(0, right_idx); rp = right.paragraphs[0]; rp.text = ""
+    utils.add_styled_text(rp,  exam_title,                size=12, bold=True, uppercase=True,  align=WD_ALIGN_PARAGRAPH.CENTER)
+    rp2 = right.add_paragraph(); utils.add_styled_text(rp2, f"NĂM HỌC {school_year}", size=11, bold=True, uppercase=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    rp3 = right.add_paragraph(); utils.add_styled_text(rp3, f"Môn: {subject}",        size=11, bold=True, uppercase=False, align=WD_ALIGN_PARAGRAPH.CENTER)
+    rp4 = right.add_paragraph(); utils.add_styled_text(rp4, duration_text,            size=10, bold=False, italic=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    
     doc.add_paragraph("")
     add_info_line_with_leaders(doc, exam_code)
     utils.add_horizontal_rule(doc, thickness_eighths=8)
@@ -577,30 +624,151 @@ def shuffle_options_in_place(q: dict, rng: random.Random, enable: bool = True):
 # ============= CHIẾN LƯỢC CHỌN CÂU =============
 def choose_questions(all_questions: List[dict], n_questions: int, strategy: str,
                      exam_idx: int, total_exams: int, base_perm: List[int],
-                     rng: random.Random) -> List[dict]:
-    N = len(all_questions)
+                     rng: random.Random, 
+                     diff_distribution: Dict[str, int] = None,
+                     avoid_similar: bool = True) -> List[dict]:
+    """
+    Chiến lược chọn câu hỏi nâng cao:
+    - n_questions: Tổng số câu cần lấy.
+    - diff_distribution: { "Dễ": 10, "Khó": 5, ... } - Số câu cụ thể cho từng loại.
+    - avoid_similar: Nếu True, khử trùng lặp nội dung trước khi chọn.
+    """
+    # 1. Tiền xử lý: Khử trùng lặp nội dung
+    if avoid_similar:
+        unique_qs = []
+        seen_hashes = set()
+        for q in all_questions:
+            # Ưu tiên dùng hash có sẵn, nếu không tính toán dựa trên stem_text và options
+            h = q.get("content_hash")
+            if not h:
+                # Tính hash nhanh từ nội dung text
+                txt_content = (q.get("stem_text") or "").strip().lower()
+                for opt in q.get("options", []):
+                    opt_txt = "".join(sp.get("text", "") for sp in opt.get("info", {}).get("spans", []) if sp.get("type") == "text")
+                    txt_content += "|" + opt_txt.strip().lower()
+                import hashlib
+                h = hashlib.md5(txt_content.encode("utf-8")).hexdigest()
+                q["content_hash"] = h # Cache lại để dùng cho các đề sau của cùng đợt
+            
+            if h not in seen_hashes:
+                unique_qs.append(q)
+                seen_hashes.add(h)
+        pool = unique_qs
+    else:
+        pool = all_questions
+
+    N = len(pool)
     if n_questions > N:
         n_questions = N
 
+    # 2. Thực hiện chọn theo chiến lược
+    
+    # CHIẾN LƯỢC: Ngẫu nhiên KHÔNG lặp lại (Có thể kết hợp Ma trận)
+    if strategy == "Ngẫu nhiên KHÔNG lặp lại":
+        if diff_distribution:
+            # 2.1 Ma trận đề KHÔNG lặp lại
+            # Gom nhóm pool đã khử trùng lặp theo độ khó
+            buckets: Dict[str, List[dict]] = {}
+            for q in pool:
+                key = (q.get("diff_code") or "UNK").upper()
+                buckets.setdefault(key, []).append(q)
+            
+            chosen = []
+            for d_code, count in diff_distribution.items():
+                key = d_code.upper()
+                if key in buckets:
+                    s_pool = buckets[key]
+                    n_in_bucket = len(s_pool)
+                    # Tạo hoán vị deterministic cho bucket này
+                    # Dùng seed từ code_sta (thông qua n_questions hoặc exam_idx)
+                    # Tuy nhiên, choose_questions không biết code_sta trực tiếp, 
+                    # nó dùng rng (rng_exam) hoặc base_perm. 
+                    # Để đơn giản, ta dùng rng của exam để shuffle s_pool? 
+                    # KHÔNG, nếu shuffle bằng rng_exam thì mỗi đề sẽ lấy ngẫu nhiên và có thể lặp.
+                    # TA CẦN dùng một logic deterministic dựa trên exam_idx.
+                    
+                    # Hack: Dùng random với seed cố định để shuffle bucket
+                    b_rng = random.Random(hash(key) + 888) 
+                    b_perm = list(range(n_in_bucket))
+                    b_rng.shuffle(b_perm)
+                    
+                    start = ((exam_idx - 1) * count) % n_in_bucket
+                    for i in range(count):
+                        idx = b_perm[(start + i) % n_in_bucket]
+                        chosen.append(s_pool[idx])
+            
+            # Bổ sung nếu chưa đủ (lấy từ phần còn lại của pool)
+            if len(chosen) < n_questions:
+                rest = [q for q in pool if q not in chosen]
+                if rest:
+                    needed = n_questions - len(chosen)
+                    # Để rest cũng không lặp lại
+                    r_rng = random.Random(777)
+                    r_perm = list(range(len(rest)))
+                    r_rng.shuffle(r_perm)
+                    r_start = ((exam_idx - 1) * needed) % len(rest)
+                    for i in range(min(needed, len(rest))):
+                        chosen.append(rest[r_perm[(r_start + i) % len(rest)]])
+            
+            rng.shuffle(chosen)
+            return chosen[:n_questions]
+        else:
+            # 2.2 Ngẫu nhiên KHÔNG lặp lại (không quan tâm độ khó)
+            start = ((exam_idx - 1) * n_questions) % N
+            take = []
+            i = 0
+            while len(take) < n_questions and i < N:
+                idx_in_pool = base_perm[(start + i) % N]
+                if idx_in_pool < N:
+                    take.append(pool[idx_in_pool])
+                i += 1
+            return take
+
+    # CHIẾN LƯỢC: Phân bổ Ma trận (Mặc định - có thể trùng lặp nếu bank nhỏ)
+    if strategy == "Phân bổ Ma trận" and diff_distribution:
+        buckets: Dict[str, List[dict]] = {}
+        for q in pool:
+            key = (q.get("diff_code") or "UNK").upper()
+            buckets.setdefault(key, []).append(q)
+        
+        chosen = []
+        for d_code, count in diff_distribution.items():
+            key = d_code.upper()
+            if key in buckets:
+                s_pool = buckets[key][:]
+                rng.shuffle(s_pool)
+                chosen.extend(s_pool[:count])
+        
+        if len(chosen) < n_questions:
+            remaining = [q for q in pool if q not in chosen]
+            if remaining:
+                extra_needed = n_questions - len(chosen)
+                chosen.extend(rng.sample(remaining, min(len(remaining), extra_needed)))
+        
+        rng.shuffle(chosen)
+        return chosen[:n_questions]
+
     if strategy == "Ngẫu nhiên thuần":
-        return rng.sample(all_questions, n_questions)
+        return rng.sample(pool, n_questions)
 
     if strategy == "Xoay vòng theo mã đề":
         start = ((exam_idx - 1) * n_questions) % N
         take = []
         i = 0
         while len(take) < n_questions and i < N:
-            take.append(all_questions[ base_perm[(start + i) % N] ])
+            idx_in_pool = base_perm[(start + i) % N]
+            if idx_in_pool < N:
+                take.append(pool[idx_in_pool])
             i += 1
         return take
 
     if strategy == "Phân tầng theo độ khó (nếu có)":
         buckets: Dict[str, List[dict]] = {}
-        for q in all_questions:
+        for q in pool:
             key = (q.get("diff_code") or "UNK")
             buckets.setdefault(key, []).append(q)
         if len(buckets) <= 1:
-            return rng.sample(all_questions, n_questions)
+            return rng.sample(pool, n_questions)
 
         keys = sorted(buckets.keys())
         k = len(keys)
@@ -610,12 +778,12 @@ def choose_questions(all_questions: List[dict], n_questions: int, strategy: str,
         chosen = []
         for idx, key in enumerate(keys):
             need = base + (1 if idx < rem else 0)
-            pool = buckets[key][:]
-            rng.shuffle(pool)
-            chosen.extend(pool[:need])
+            pool_k = buckets[key][:]
+            rng.shuffle(pool_k)
+            chosen.extend(pool_k[:need])
 
         if len(chosen) < n_questions:
-            remaining = [q for q in all_questions if q not in chosen]
+            remaining = [q for q in pool if q not in chosen]
             if remaining:
                 extra = rng.sample(remaining, min(len(remaining), n_questions - len(chosen)))
                 chosen.extend(extra)
@@ -623,14 +791,31 @@ def choose_questions(all_questions: List[dict], n_questions: int, strategy: str,
         rng.shuffle(chosen)
         return chosen
 
-    return rng.sample(all_questions, n_questions)
+    return rng.sample(pool, n_questions)
+
+def generate_qr_code(data: str) -> Optional[bytes]:
+    """Tạo QR Code từ chuỗi dữ liệu, trả về bytes ảnh PNG."""
+    try:
+        import qrcode
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except ImportError:
+        return None
+    except Exception:
+        return None
 
 # ============= XÂY 1 ĐỀ TỪ DANH SÁCH CÂU + (TUỲ CHỌN) ĐẢO =============
 def build_exam_from_selected(selected_questions: List[dict],
                              school, faculty, subject, duration_text,
                              exam_title, school_year, exam_code,
                              tail_text, shuffle_answers: bool, seed: int,
-                             ans_layout: str = "Tự động"):
+                             ans_layout: str = "Tự động", use_qr: bool = False):
     rng = random.Random(seed)
 
     # TỐI ƯU HÓA: Không dùng deepcopy toàn bộ (nặng). 
@@ -647,7 +832,9 @@ def build_exam_from_selected(selected_questions: List[dict],
     utils.set_page_layout(dst_doc)
     utils.set_single_line_spacing(dst_doc)
     utils.add_page_number_to_footer(dst_doc, use_section_pages=False)
-    add_header_2cols(dst_doc, school, faculty, exam_title, school_year, subject, duration_text, exam_code)
+    
+    qr_data = f"EXAM:{exam_code}|SUBJ:{subject}|DATE:{datetime.now().strftime('%Y%m%d')}" if use_qr else None
+    add_header_2cols(dst_doc, school, faculty, exam_title, school_year, subject, duration_text, exam_code, qr_data=qr_data)
 
     for i, q in enumerate(selected, 1):
         render_question(dst_doc, i, q, ans_layout=ans_layout)
@@ -680,6 +867,9 @@ class MixTab:
         self.var_export_mode = tk.StringVar(value="Chỉ tổng hợp")
         self.var_strategy = tk.StringVar(value="Ngẫu nhiên thuần")
         self.var_ans_layout = tk.StringVar(value="Tự động")
+        self.var_use_qr = tk.BooleanVar(value=True)
+        self.diff_dist = {"DỄ": 0, "TB": 0, "KHÓ": 0} # Phân bổ độ khó mong muốn
+
 
         # ====== Layout chính: 2 cột đều nhau ======
         parent.columnconfigure(0, weight=1, uniform="col")
@@ -758,16 +948,24 @@ class MixTab:
         ttk.OptionMenu(frm_right, self.var_export_mode, "Chỉ tổng hợp", 
                        "Chỉ tổng hợp", "Cả hai", "Chỉ từng đề").grid(row=r2, column=1, sticky="ew", padx=utils.PAD_S); r2+=1
         
-        ttk.OptionMenu(frm_right, self.var_strategy, "Ngẫu nhiên thuần", 
-                       "Ngẫu nhiên thuần", "Xoay vòng theo mã đề", "Phân tầng độ khó").grid(row=r2, column=1, sticky="ew", padx=utils.PAD_S); r2+=1
+        ttk.Label(frm_right, text="Chiến lược chọn:").grid(row=r2, column=0, sticky="e", padx=utils.PAD_S, pady=utils.PAD_XS)
+        frm_strat = ttk.Frame(frm_right)
+        frm_strat.grid(row=r2, column=1, sticky="ew", padx=utils.PAD_S); r2+=1
+        ttk.OptionMenu(frm_strat, self.var_strategy, "Ngẫu nhiên thuần", 
+                       "Ngẫu nhiên thuần", "Ngẫu nhiên KHÔNG lặp lại", "Xoay vòng theo mã đề", "Phân tầng độ khó", "Phân bổ Ma trận").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(frm_strat, text="⚙️", width=3, command=self.setup_diff_dist).pack(side=tk.LEFT, padx=2)
+
 
         ttk.Label(frm_right, text="Bố cục đáp án:").grid(row=r2, column=0, sticky="e", padx=utils.PAD_S, pady=utils.PAD_XS)
         ttk.OptionMenu(frm_right, self.var_ans_layout, "Tự động", 
                        "Tự động", "Dàn 4 cột (4x1)", "Dàn 2 cột (2x2)", "Dưới nhau (1x4)").grid(row=r2, column=1, sticky="ew", padx=utils.PAD_S); r2+=1
 
         self.var_shuffle_ans = tk.BooleanVar(value=True)
-        ttk.Checkbutton(frm_right, text="Đảo thứ tự đáp án (A–D)", variable=self.var_shuffle_ans)\
-            .grid(row=r2, column=1, sticky="w", padx=utils.PAD_S); r2 += 1
+        frm_opts = ttk.Frame(frm_right)
+        frm_opts.grid(row=r2, column=1, sticky="w", padx=utils.PAD_S); r2 += 1
+        ttk.Checkbutton(frm_opts, text="Đảo đáp án (A–D)", variable=self.var_shuffle_ans).pack(side=tk.LEFT)
+        ttk.Checkbutton(frm_opts, text="Chèn QR Code", variable=self.var_use_qr).pack(side=tk.LEFT, padx=utils.PAD_M)
+
 
         self.btn_run = ttk.Button(frm_right, text="🚀 Bắt đầu Trộn đề", command=self.run, state="disabled", bootstyle="success")
         self.btn_run.grid(row=r2, column=0, columnspan=2, sticky="ew", padx=utils.PAD_S, pady=utils.PAD_S); r2+=1
@@ -798,6 +996,27 @@ class MixTab:
 
     def logmsg(self, s): 
         self.log.insert(END, s + "\n"); self.log.see(END)
+
+    def _get_source_stats(self, questions: List[Dict]) -> Dict:
+        """Thống kê số lượng câu hỏi theo (Chương, Độ khó)."""
+        stats = {}
+        for q in questions:
+            ch = (q.get("chapter") or "Không chương").strip()
+            df = (q.get("diff_code") or "KSC").strip().upper()
+            key = (ch, df)
+            stats[key] = stats.get(key, 0) + 1
+        return stats
+
+    def _distribute_count_to_matrix(self, total: int, stats: Dict) -> Dict:
+        """Phân bổ một tổng số câu nhất định vào các bucket (Chương, Độ khó) một cách tuần tự."""
+        res = {}
+        rem = total
+        for key in sorted(stats.keys()):
+            avail = stats[key]
+            take = min(rem, avail)
+            res[key] = take
+            rem -= take
+        return res
 
     def manage_matrix(self):
         """Mở hộp thoại thiết lập ma trận đề từ nhiều tệp nguồn."""
@@ -848,7 +1067,14 @@ class MixTab:
                 qs, _, warns = split_questions_from_docx(f)
                 if warns:
                     self.logmsg(f"Cảnh báo khi nạp {os.path.basename(f)}: " + "; ".join(warns))
-                self.matrix_data.append({"path": f, "questions": qs, "pick_count": len(qs)})
+                stats = self._get_source_stats(qs)
+                self.matrix_data.append({
+                    "path": f, 
+                    "questions": qs, 
+                    "pick_count": len(qs),
+                    "stats": stats,
+                    "pick_matrix": stats.copy() 
+                })
                 refresh_tree()
             except Exception as e:
                 messagebox.showerror("Lỗi", str(e))
@@ -870,10 +1096,18 @@ class MixTab:
                                          initialvalue=item["pick_count"], minvalue=0, maxvalue=len(item["questions"]))
             if c is not None:
                 item["pick_count"] = c
+                # Nếu sửa tổng số câu, ta reset matrix chi tiết về trạng thái lấy đều (hoặc lấy hết từ đầu đến khi đủ)
+                # Tuy nhiên tốt nhất là báo user nên vào Thiết lập chi tiết.
                 refresh_tree()
 
+        def edit_detail():
+            sel = tree.selection()
+            if not sel: return
+            idx = tree.index(sel[0])
+            self._edit_granular_matrix(idx, refresh_tree)
+
         def confirm():
-            # Gom toàn bộ câu hỏi từ ma trận
+            # Gom toàn bộ câu hỏi từ ma trận theo thiết lập chi tiết
             new_all_qs = []
             for item in self.matrix_data:
                 # Đánh dấu nguồn để dễ truy vết nếu cần
@@ -897,6 +1131,7 @@ class MixTab:
         ttk.Button(frm_btns, text="➕ Thêm file", command=add_file).pack(side=tk.LEFT, padx=5)
         ttk.Button(frm_btns, text="💾 Thêm từ CSDL", command=lambda: self._add_db_bank_to_matrix(self.matrix_data, refresh_tree)).pack(side=tk.LEFT, padx=5)
         ttk.Button(frm_btns, text="✏️ Đổi số lượng", command=edit_count).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frm_btns, text="📋 Thiết lập chi tiết", command=edit_detail, bootstyle="info").pack(side=tk.LEFT, padx=5)
         ttk.Button(frm_btns, text="❌ Xóa", command=remove_file).pack(side=tk.LEFT, padx=5)
         ttk.Button(frm_btns, text="✅ Xác nhận ma trận", command=confirm, bootstyle="success").pack(side=tk.RIGHT, padx=5)
 
@@ -912,7 +1147,21 @@ class MixTab:
             self.questions = qs.copy()
             self.selected_indices = list(range(len(qs)))
             self.pinned_indices = []
-            self.matrix_data = [{"path": fname, "questions": qs, "pick_count": len(qs)}]
+            stats = self._get_source_stats(qs)
+            # Nếu là file đơn lẻ, ta lấy pick_count từ UI n_questions (nếu có thể)
+            try:
+                target_n = int(self.var_num_questions.get())
+            except:
+                target_n = len(qs)
+            
+            p_matrix = self._distribute_count_to_matrix(min(target_n, len(qs)), stats)
+            self.matrix_data = [{
+                "path": fname, 
+                "questions": qs, 
+                "pick_count": sum(p_matrix.values()),
+                "stats": stats,
+                "pick_matrix": p_matrix
+            }]
             self.lbl_bank.config(text=os.path.basename(fname))
             self.logmsg(f"Đã nạp {len(self.questions)} câu hỏi hợp lệ.")
             self.btn_run["state"] = "normal"
@@ -1011,12 +1260,12 @@ class MixTab:
         banks = db.get_all_banks()
         if not banks:
             messagebox.showinfo("Thông báo", 
-                "Chưa có ngân hàng nào trong CSDL.\n"
-                "Hãy vào tab 'Ngân hàng' để import file Word vào DB trước.")
+                "Chưa có dữ liệu nào trong CSDL.\n"
+                "Hãy vào tab 'Ngân hàng' để import file Word vào hệ thống trước.")
             return
 
         dlg = tk.Toplevel(self.parent)
-        dlg.title("Chọn câu hỏi từ Cơ sở dữ liệu")
+        dlg.title("Chọn câu hỏi từ Ngân hàng môn học (Cáp 1)")
         utils.set_window_icon(dlg)
         dlg.geometry("950x600")
         dlg.transient(self.parent.winfo_toplevel())
@@ -1026,7 +1275,7 @@ class MixTab:
         frm_filter = ttk.LabelFrame(dlg, text="Bộ lọc")
         frm_filter.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(frm_filter, text="Môn học:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(frm_filter, text="Ngân hàng (Môn):").grid(row=0, column=0, padx=5, pady=5, sticky="e")
         var_subject = tk.StringVar()
         ttk.Entry(frm_filter, textvariable=var_subject, width=20).grid(row=0, column=1, padx=5, pady=5)
 
@@ -1038,25 +1287,28 @@ class MixTab:
         var_kw = tk.StringVar()
         ttk.Entry(frm_filter, textvariable=var_kw, width=20).grid(row=0, column=5, padx=5, pady=5)
 
+        ttk.Label(frm_filter, text="Chương:").grid(row=0, column=6, padx=5, pady=5, sticky="e")
+        var_chapter = tk.StringVar()
+        ttk.Entry(frm_filter, textvariable=var_chapter, width=8).grid(row=0, column=7, padx=5, pady=5)
+
+
         # --- Danh sách ngân hàng (bên trái) ---
         frm_body = ttk.Frame(dlg)
         frm_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        frm_banks = ttk.LabelFrame(frm_body, text="Ngân hàng đã import")
+        frm_banks = ttk.LabelFrame(frm_body, text="Ngân hàng & File")
         frm_banks.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        bank_cols = ("check", "name", "subject", "total", "pick")
-        bank_tree = ttk.Treeview(frm_banks, columns=bank_cols, show="headings", height=15)
-        bank_tree.heading("check", text="☑")
-        bank_tree.heading("name", text="Tên ngân hàng")
-        bank_tree.heading("subject", text="Môn học")
+        bank_cols = ("total", "pick")
+        bank_tree = ttk.Treeview(frm_banks, columns=bank_cols, show="tree headings", height=15)
+        # Tree column (ID #0) sẽ dùng cho Ngân hàng / Tên file kèm nút check
+        bank_tree.heading("#0", text="Ngân hàng (Môn) / File")
         bank_tree.heading("total", text="Tổng câu")
         bank_tree.heading("pick", text="Số lấy")
-        bank_tree.column("check", width=35, anchor=tk.CENTER)
-        bank_tree.column("name", width=250, anchor=tk.W)
-        bank_tree.column("subject", width=120, anchor=tk.W)
-        bank_tree.column("total", width=70, anchor=tk.CENTER)
-        bank_tree.column("pick", width=70, anchor=tk.CENTER)
+        
+        bank_tree.column("#0", width=350, anchor=tk.W)
+        bank_tree.column("total", width=80, anchor=tk.CENTER)
+        bank_tree.column("pick", width=80, anchor=tk.CENTER)
 
         vsb = ttk.Scrollbar(frm_banks, orient="vertical", command=bank_tree.yview)
         bank_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1076,33 +1328,66 @@ class MixTab:
 
         def refresh_bank_tree():
             bank_tree.delete(*bank_tree.get_children())
-            kw_filter = var_kw.get().strip().lower()
-            subj_filter = var_subject.get().strip().lower()
-            diff_filter = var_diff.get().strip()
             
+            # Gom nhóm theo môn học
+            subjects = {} # subj_name -> [banks]
             for b in banks:
-                info = bank_selection[b["id"]]
-                # Lọc theo môn học
-                if subj_filter and subj_filter not in info["subject"].lower():
-                    continue
+                s_name = b.get("subject_name") or "Chưa phân loại"
+                if s_name not in subjects:
+                    subjects[s_name] = []
+                subjects[s_name].append(b)
+            
+            sorted_subs = sorted(subjects.keys())
+            
+            for s_name in sorted_subs:
+                sub_banks = subjects[s_name]
+                # Tính tổng câu của môn
+                s_total = sum(b["total_questions"] for b in sub_banks)
+                s_pick = sum(bank_selection[b["id"]]["pick_count"] for b in sub_banks if bank_selection[b["id"]]["selected"])
                 
-                check_mark = "☑" if info["selected"] else "☐"
-                bank_tree.insert("", "end", iid=str(b["id"]), values=(
-                    check_mark, info["name"], info["subject"],
-                    info["total"], info["pick_count"]
-                ))
+                # Kiểm tra trạng thái check của môn (Tất cả con được check hay không)
+                s_any_selected = any(bank_selection[b["id"]]["selected"] for b in sub_banks)
+                s_all_selected = all(bank_selection[b["id"]]["selected"] for b in sub_banks)
+                s_check = "☑" if s_all_selected else ("▣" if s_any_selected else "☐")
+                
+                sid = bank_tree.insert("", "end", text=f"{s_check} {s_name}", open=True, values=(s_total, s_pick))
+                
+                for b in sub_banks:
+                    info = bank_selection[b["id"]]
+                    b_check = "☑" if info["selected"] else "☐"
+                    bank_tree.insert(sid, "end", iid=str(b["id"]), text=f"   {b_check} {info['name']}", 
+                                     values=(info["total"], info["pick_count"]))
 
         refresh_bank_tree()
 
         def toggle_bank(event):
             sel = bank_tree.selection()
             if not sel: return
-            bid = int(sel[0])
-            col = bank_tree.identify_column(event.x)
-            if col == "#1":  # Cột check
-                bank_selection[bid]["selected"] = not bank_selection[bid]["selected"]
+            item_id = sel[0]
+            
+            # Xác định xem click vào node Môn học hay node Ngân hàng
+            is_bank = item_id.isdigit()
+            
+            # Lấy vị trí click (để bắt sự kiện click vào checkmark giả ở text #0)
+            # Vì đây là hierarchical tree, ta check vùng text của cột #0
+            if bank_tree.identify_column(event.x) == "#0":
+                if is_bank:
+                    bid = int(item_id)
+                    bank_selection[bid]["selected"] = not bank_selection[bid]["selected"]
+                else:
+                    # Click vào Môn học -> Toggle toàn bộ con
+                    children = bank_tree.get_children(item_id)
+                    # Tìm trạng thái hiện tại (nếu đang có cái nào chưa chọn -> chọn hết; nếu đã chọn hết -> bỏ hết)
+                    any_unselected = any(not bank_selection[int(child)]["selected"] for child in children)
+                    new_val = any_unselected
+                    for child in children:
+                        bank_selection[int(child)]["selected"] = new_val
+                
                 refresh_bank_tree()
-            elif col == "#5":  # Cột pick
+                update_total()
+            
+            elif is_bank and bank_tree.identify_column(event.x) == "#2": # Cột Số lấy
+                bid = int(item_id)
                 from tkinter import simpledialog
                 c = simpledialog.askinteger(
                     "Số lượng", f"Số câu lấy từ '{bank_selection[bid]['name']}':",
@@ -1112,6 +1397,7 @@ class MixTab:
                 if c is not None:
                     bank_selection[bid]["pick_count"] = c
                     refresh_bank_tree()
+                    update_total()
 
         bank_tree.bind("<Button-1>", toggle_bank)
 
@@ -1122,7 +1408,7 @@ class MixTab:
         def update_total():
             total = sum(info["pick_count"] for info in bank_selection.values() if info["selected"])
             n_banks = sum(1 for info in bank_selection.values() if info["selected"])
-            lbl_total.config(text=f"Tổng cộng: {total} câu từ {n_banks} ngân hàng")
+            lbl_total.config(text=f"Tổng cộng: {total} câu từ {n_banks} File")
         update_total()
 
         def confirm_load():
@@ -1138,6 +1424,8 @@ class MixTab:
             self.parent.update_idletasks()
             
             all_qs = []
+            seen_hashes = set()
+            dup_count = 0
             self.matrix_data = []
             
             for bid, info in selected_banks:
@@ -1146,20 +1434,42 @@ class MixTab:
                 db_qs = db.search_questions(
                     bank_id=bid,
                     diff_code=diff_filter,
+                    chapter=var_chapter.get().strip(),
                     keyword=var_kw.get().strip(),
                     limit=9999
                 )
+
                 converted = self._convert_db_questions(db_qs)
+                
+                # Khử trùng lặp: Chỉ giữ lại những câu chưa thấy hash
+                unique_converted = []
+                for q in converted:
+                    q_hash = q.get("content_hash")
+                    if q_hash:
+                        if q_hash in seen_hashes:
+                            dup_count += 1
+                            continue
+                        seen_hashes.add(q_hash)
+                    unique_converted.append(q)
+                
+                if not unique_converted: continue
+
+                stats = self._get_source_stats(unique_converted)
+                # Tính toán lại số lượng cần lấy cho từng File nếu có khử trùng
+                p_count = min(info["pick_count"], len(unique_converted))
+                p_matrix = self._distribute_count_to_matrix(p_count, stats)
                 
                 self.matrix_data.append({
                     "path": f"[DB] {info['name']}",
-                    "questions": converted,
-                    "pick_count": min(info["pick_count"], len(converted))
+                    "questions": unique_converted,
+                    "pick_count": sum(p_matrix.values()),
+                    "stats": stats,
+                    "pick_matrix": p_matrix
                 })
-                all_qs.extend(converted)
+                all_qs.extend(unique_converted)
             
             if not all_qs:
-                messagebox.showwarning("Cảnh báo", "Không tìm thấy câu hỏi nào với bộ lọc hiện tại!", parent=dlg)
+                messagebox.showwarning("Cảnh báo", "Không tìm thấy câu hỏi nào (hoặc toàn bộ bị trùng lặp)!", parent=dlg)
                 return
 
             self.all_questions = all_qs
@@ -1168,10 +1478,13 @@ class MixTab:
             self.pinned_indices = []
             self.src_doc = None  # Không có source document khi từ DB
 
-            self.lbl_bank.config(text=f"💾 CSDL: {len(all_qs)} câu từ {len(selected_banks)} ngân hàng")
+            lbl_msg = f"💾 Ngân hàng: {len(all_qs)} câu từ {len(self.matrix_data)} File"
+            if dup_count > 0:
+                lbl_msg += f" (Đã loại {dup_count} câu trùng)"
+            self.lbl_bank.config(text=lbl_msg)
             self.btn_select_qs["state"] = "normal"
             self.btn_run["state"] = "normal"
-            self.logmsg(f"💾 Đã nạp {len(all_qs)} câu hỏi từ CSDL ({len(selected_banks)} ngân hàng).")
+            self.logmsg(f"💾 Đã nạp {len(all_qs)} câu hỏi từ Ngân hàng ({len(selected_banks)} File).")
             self.lbl_status.config(text="Sẵn sàng")
             dlg.destroy()
 
@@ -1192,35 +1505,156 @@ class MixTab:
             return
 
         dlg = tk.Toplevel(self.parent)
-        dlg.title("Chọn ngân hàng từ CSDL")
+        dlg.title("Chọn File từ Ngân hàng môn học")
         utils.set_window_icon(dlg)
         dlg.geometry("600x400")
         dlg.transient(self.parent.winfo_toplevel())
         dlg.grab_set()
 
-        ttk.Label(dlg, text="Chọn ngân hàng để thêm vào ma trận:").pack(padx=10, pady=(10, 5), anchor="w")
+        ttk.Label(dlg, text="Chọn File (Cấp 2) để thêm vào ma trận:").pack(padx=10, pady=(10, 5), anchor="w")
 
-        lb = tk.Listbox(dlg, selectmode=tk.MULTIPLE)
-        lb.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        tree = ttk.Treeview(dlg, columns=("total",), show="tree headings", height=12)
+        tree.heading("#0", text="Ngân hàng (Môn) / File")
+        tree.heading("total", text="Câu")
+        tree.column("#0", width=400)
+        tree.column("total", width=80, anchor=tk.CENTER)
+        
+        vsb = ttk.Scrollbar(dlg, orient="vertical", command=tree.yview)
+        tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.configure(yscrollcommand=vsb.set)
+
+        # Gom nhóm theo môn
+        subjects = {}
         for b in banks:
-            lb.insert(tk.END, f"{b['file_name']} ({b['total_questions']} câu, Môn: {b.get('subject_name', 'N/A')})")
+            s_name = b.get("subject_name") or "Chưa phân loại"
+            if s_name not in subjects: subjects[s_name] = []
+            subjects[s_name].append(b)
+            
+        for s_name in sorted(subjects.keys()):
+            sub_banks = subjects[s_name]
+            s_total = sum(b["total_questions"] for b in sub_banks)
+            sid = tree.insert("", "end", text=s_name, values=(s_total,), open=True)
+            for b in sub_banks:
+                tree.insert(sid, "end", iid=str(b["id"]), text=b["file_name"], values=(b["total_questions"],))
 
         def on_add():
-            sels = lb.curselection()
+            sels = tree.selection()
             if not sels: return
-            for idx in sels:
-                b = banks[idx]
-                db_qs = db.search_questions(bank_id=b["id"], limit=9999)
+            
+            # Tập hợp các ngân hàng cần thêm (bao gồm chọn lẻ hoặc chọn cả môn)
+            bank_ids_to_add = set()
+            for item_id in sels:
+                if item_id.isdigit():
+                    bank_ids_to_add.add(int(item_id))
+                else:
+                    # Chọn cả môn -> Lấy tất cả iid con
+                    for child in tree.get_children(item_id):
+                        bank_ids_to_add.add(int(child))
+            
+            if not bank_ids_to_add: return
+            
+            for bid in bank_ids_to_add:
+                # Tìm bank info trong danh sách gốc
+                b = next((x for x in banks if x["id"] == bid), None)
+                if not b: continue
+                
+                db_qs = db.search_questions(bank_id=bid, limit=9999)
                 converted = self._convert_db_questions(db_qs)
+                stats = self._get_source_stats(converted)
                 matrix_data.append({
                     "path": f"[DB] {b['file_name']}",
                     "questions": converted,
-                    "pick_count": len(converted)
+                    "pick_count": len(converted),
+                    "stats": stats,
+                    "pick_matrix": stats.copy()
                 })
             refresh_callback()
             dlg.destroy()
 
-        ttk.Button(dlg, text="✅ Thêm vào ma trận", command=on_add).pack(pady=10)
+        ttk.Button(dlg, text="✅ Thêm vào ma trận", command=on_add, bootstyle="success").pack(pady=10)
+
+    def _edit_granular_matrix(self, matrix_idx: int, refresh_callback):
+        """Mở dialog thiết lập số câu chi tiết cho một nguồn (Chương x Độ khó)."""
+        item = self.matrix_data[matrix_idx]
+        stats = item["stats"]
+        pick_matrix = item["pick_matrix"]
+        
+        dlg = tk.Toplevel(self.parent)
+        dlg.title(f"Ma trận chi tiết: {os.path.basename(item['path'])}")
+        utils.setup_dialog(dlg, width_pct=0.6, height_pct=0.6, parent=self.parent)
+        
+        ttk.Label(dlg, text=f"Thiết lập số câu cho: {os.path.basename(item['path'])}", font=utils.FONT_BOLD).pack(pady=10)
+        
+        frm_scroll = ttk.Frame(dlg)
+        frm_scroll.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(frm_scroll)
+        vsb = ttk.Scrollbar(frm_scroll, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=vsb.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        # Lấy danh sách chương và độ khó duy nhất
+        chapters = sorted(list(set(k[0] for k in stats.keys())))
+        diffs = sorted(list(set(k[1] for k in stats.keys())))
+        
+        # Header
+        ttk.Label(scrollable_frame, text="Chương / Mức độ", font=utils.FONT_BOLD).grid(row=0, column=0, padx=5, pady=5)
+        for j, d in enumerate(diffs):
+            ttk.Label(scrollable_frame, text=d, font=utils.FONT_BOLD).grid(row=0, column=j+1, padx=5, pady=5)
+            
+        entries = {} # (ch, df) -> tk.StringVar
+        
+        for i, ch in enumerate(chapters):
+            ttk.Label(scrollable_frame, text=ch, width=30, anchor="w").grid(row=i+1, column=0, padx=5, pady=2, sticky="w")
+            for j, d in enumerate(diffs):
+                key = (ch, d)
+                avail = stats.get(key, 0)
+                current = pick_matrix.get(key, 0)
+                
+                var = tk.StringVar(value=str(current))
+                if avail > 0:
+                    ent = ttk.Entry(scrollable_frame, textvariable=var, width=8, justify="center")
+                    ent.grid(row=i+1, column=j+1, padx=5, pady=2)
+                    ttk.Label(scrollable_frame, text=f"/{avail}", foreground="gray").grid(row=i+1, column=j+1, sticky="e", padx=(0, 2))
+                    entries[key] = (var, avail)
+                else:
+                    ttk.Label(scrollable_frame, text="-", foreground="gray").grid(row=i+1, column=j+1, padx=5, pady=2)
+
+        def save():
+            new_matrix = {}
+            total = 0
+            try:
+                for key, (var, avail) in entries.items():
+                    val = int(var.get() or 0)
+                    if val < 0: val = 0
+                    if val > avail:
+                        messagebox.showwarning("Cảnh báo", f"Chương '{key[0]}' độ khó {key[1]} chỉ có {avail} câu. Đã tự động điều chỉnh.")
+                        val = avail
+                    new_matrix[key] = val
+                    total += val
+                
+                item["pick_matrix"] = new_matrix
+                item["pick_count"] = total
+                refresh_callback()
+                dlg.destroy()
+            except ValueError:
+                messagebox.showerror("Lỗi", "Vui lòng nhập số nguyên hợp lệ!")
+
+        frm_bottom = ttk.Frame(dlg, padding=10)
+        frm_bottom.pack(fill=tk.X)
+        ttk.Button(frm_bottom, text="✅ Lưu thiết lập", command=save, bootstyle="success").pack(side=tk.RIGHT, padx=5)
+        ttk.Button(frm_bottom, text="✖ Hủy", command=dlg.destroy).pack(side=tk.RIGHT, padx=5)
 
 
     def select_questions(self):
@@ -1433,6 +1867,35 @@ class MixTab:
         ttk.Button(frm_bot, text="Bỏ chọn tất cả", command=deselect_all).pack(side=tk.LEFT, padx=5)
         ttk.Button(frm_bot, text="Xác nhận", command=on_ok).pack(side=tk.RIGHT, padx=5)
 
+    def setup_diff_dist(self):
+        """Mở dialog thiết lập tỷ lệ/số câu theo độ khó."""
+        dlg = tk.Toplevel(self.parent)
+        utils.setup_dialog(dlg, width_pct=0.3, height_pct=0.3, title="Thiết lập Độ khó", parent=self.parent)
+        
+        ttk.Label(dlg, text="Số câu cho từng mức độ khó:", font=utils.FONT_BOLD).pack(pady=10)
+        
+        frm = ttk.Frame(dlg, padding=20)
+        frm.pack(fill=tk.X)
+        
+        vars_dist = {}
+        for i, (k, v) in enumerate(self.diff_dist.items()):
+            ttk.Label(frm, text=f"{k}:").grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            var = tk.StringVar(value=str(v))
+            ttk.Entry(frm, textvariable=var, width=10).grid(row=i, column=1, padx=5, pady=5)
+            vars_dist[k] = var
+            
+        def save():
+            try:
+                for k in self.diff_dist:
+                    self.diff_dist[k] = int(vars_dist[k].get())
+                dlg.destroy()
+                self.logmsg(f"Đã cập nhật phân bổ: {self.diff_dist}")
+            except ValueError:
+                messagebox.showerror("Lỗi", "Số lượng phải là số nguyên!")
+
+        ttk.Button(dlg, text="Lưu", command=save, bootstyle="success").pack(pady=10)
+
+
     def run(self):
         if not self.questions:
             return
@@ -1467,6 +1930,8 @@ class MixTab:
         strategy = self.var_strategy.get()
         shuffle_answers = self.var_shuffle_ans.get()
         ans_layout = self.var_ans_layout.get()
+
+
         
 
         import re
@@ -1510,10 +1975,76 @@ class MixTab:
         answers_by_code: Dict[int, List[str]] = {}
         variants_db_data: List[Dict] = []  # Dữ liệu cho DB
 
-        # Hoán vị nền (cho "Xoay vòng")
-        rng_global = random.Random(20250923)
-        base_perm = list(range(len(self.questions)))
-        rng_global.shuffle(base_perm)
+        # --- CHUẨN BỊ QUỸ CÂU HỎI (Deduplication & Granular Selection) ---
+        pinned_qs = [self.all_questions[idx] for idx in self.pinned_indices]
+        
+        # Gom nhóm câu hỏi theo từng nguồn và từng (ch, df) để chọn theo ma trận
+        source_buckets = []
+        for item in self.matrix_data:
+            buckets = {}
+            for q in item["questions"]:
+                # Bỏ qua nếu câu này đã được Pinned ở trên
+                # (Lưu ý: Logic pinned hiện tại lấy từ self.all_questions, 
+                # cần so sánh content_hash hoặc object ID)
+                is_pinned = any(id(q) == id(pq) for pq in pinned_qs)
+                if is_pinned: continue
+
+                q_ch = (q.get("chapter") or "Không chương").strip()
+                q_df = (q.get("diff_code") or "KSC").strip().upper()
+                key = (q_ch, q_df)
+                buckets.setdefault(key, []).append(q)
+            
+            # Xáo trộn mỗi bucket 1 lần duy nhất nếu dùng chiến lược ko lặp
+            if strategy == "Ngẫu nhiên KHÔNG lặp lại":
+                for key in buckets:
+                    path_stable = os.path.basename(item["path"])
+                    seed_val = sum(ord(c) for c in path_stable + str(key)) + 888 + code_sta
+                    b_rng = random.Random(seed_val)
+                    b_rng.shuffle(buckets[key])
+            source_buckets.append(buckets)
+
+        all_exam_extra_qs = []
+        needed_per_exam = max(0, n_qs - len(pinned_qs))
+        
+        # Để đề phòng Ma trận không khớp tổng n_qs, ta tính tổng số câu sẽ lấy từ ma trận
+        total_matrix_pick = 0
+        for item in self.matrix_data:
+            total_matrix_pick += sum(item.get("pick_matrix", {}).values())
+
+        if total_matrix_pick < needed_per_exam:
+            self.logmsg(f"⚠️ CẢNH BÁO: Tổng số câu trong Ma trận ({total_matrix_pick}) ít hơn yêu cầu ({needed_per_exam}).")
+
+        for t in range(1, n_tests + 1):
+            chosen_extra = []
+            exam_seed = 10_000 + (code_sta + t - 1)
+            
+            # Duyệt qua từng nguồn trong ma trận
+            for i, item in enumerate(self.matrix_data):
+                pick_matrix = item.get("pick_matrix", {})
+                buckets = source_buckets[i]
+                
+                # Sắp xếp các key để đảm bảo thứ tự chọn ổn định
+                for key in sorted(pick_matrix.keys()):
+                    count = pick_matrix[key]
+                    if count <= 0: continue
+                    
+                    s_pool = buckets.get(key, [])
+                    if not s_pool: continue
+                    
+                    if strategy == "Ngẫu nhiên KHÔNG lặp lại":
+                        start = (t - 1) * count
+                        for j in range(count):
+                            chosen_extra.append(s_pool[(start + j) % len(s_pool)])
+                    else:
+                        # Dùng seed biến đổi theo đề và theo key
+                        r_rng = random.Random(exam_seed + i + sum(ord(c) for c in str(key)))
+                        chosen_extra.extend(r_rng.sample(s_pool, min(count, len(s_pool))))
+
+            # Nếu sau khi lấy theo ma trận vẫn thiếu (hoặc thừa), ta cắt/bổ sung
+            # (Thường sẽ đủ nếu user thiết lập đúng)
+            all_exam_extra_qs.append(chosen_extra[:needed_per_exam])
+
+        # --- KẾT THÚC CHUẨN BỊ ---
 
         # Khởi tạo thanh tiến độ
         self.progress["maximum"] = n_tests
@@ -1525,9 +2056,7 @@ class MixTab:
         if export_aggregate:
             utils.set_page_layout(all_doc)
             utils.set_single_line_spacing(all_doc)
-            # Bật phân biệt trang chẵn lẻ để hỗ trợ việc ngắt trang vật lý chính xác
             all_doc.settings.odd_and_even_pages_header_footer = True
-            # Ép phần đầu tiên bắt đầu từ trang lẻ (mặc định là vậy nhưng đặt rõ cho chắc chắn)
             if all_doc.sections:
                 all_doc.sections[0].start_type = WD_SECTION_START.ODD_PAGE
 
@@ -1535,19 +2064,8 @@ class MixTab:
             exam_code = code_sta + (t - 1)
             rng_exam = random.Random(10_000 + exam_code)
 
-            # 1) Xử lý câu hỏi cố định (Pinned)
-            pinned_qs = [self.all_questions[idx] for idx in self.pinned_indices]
-            
-            # Số câu cần lấy thêm từ quỹ đã chọn (loại bỏ những câu đã được ghim)
-            needed = max(0, n_qs - len(pinned_qs))
-            pool = [q for i, q in enumerate(self.questions) if self.selected_indices[i] not in self.pinned_indices]
-            
-            # 2) Chọn câu thêm theo chiến lược
-            extra_qs = choose_questions(
-                pool, needed, strategy=strategy,
-                exam_idx=t, total_exams=n_tests, 
-                base_perm=list(range(len(pool))), rng=rng_exam
-            )
+            extra_qs = all_exam_extra_qs[t-1]
+
             
             # Trộn chung pinned và extra
             combined_qs = pinned_qs + extra_qs
@@ -1560,8 +2078,9 @@ class MixTab:
                 school=school, faculty=faculty, subject=subject, duration_text=dur_txt,
                 exam_title=ex_title, school_year=year_txt, exam_code=exam_code,
                 tail_text=tail_text, shuffle_answers=shuffle_answers, seed=exam_code,
-                ans_layout=ans_layout
+                ans_layout=ans_layout, use_qr=self.var_use_qr.get()
             )
+
 
             # 4) Lưu
             if export_single:

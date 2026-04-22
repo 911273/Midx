@@ -18,24 +18,55 @@ import base64
 from docx.oxml.ns import nsmap
 nsmap['m'] = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 # ============= CẤU HÌNH & REGEX DÙNG CHUNG =============
-QUESTION_HEADER_PAT = re.compile(r"^\s*Câu\s*(\d+)[\s:.-]*\s*(?:\[\s*<([A-Z0-9]{1,3})>\s*\])?[\s:.-]*\s*(.*)$", re.IGNORECASE)
+QUESTION_HEADER_PAT = re.compile(r"^\s*Câu\s*(\d+)[\s:.-]*\s*(?:\[\s*<([^>]+)>\s*\])?\s*(.*)$", re.IGNORECASE)
+CHAPTER_HEADER_PAT  = re.compile(r"^\[\(<.*_C(\d+)>\)\]\s*(.*)$", re.IGNORECASE)
+RAW_OPTION_MARKER   = re.compile(r"^\s*\[\s*[<$]\s*\]\s*")
+
 # Regex nhận diện phần nhãn/tiền tố của phương án (hỗ trợ [<$>], A., - A., v.v.)
 _LABEL_REGEX = re.compile(
     r'^\s*(?:\[\s*\<\s*\$\s*\>\s*\]\s*(?:[-•●▪▫]?\s*)?(?:(?:\([A-Fa-f]\)|[A-Fa-f]\.)\s*)?|' # TH 1: Có [<$>]
     r'(?:[-•●▪▫]?\s*)?(?:\([A-Fa-f]\)|[A-Fa-f]\.)\s*)' # TH 2: Chỉ có nhãn A./B./...
 )
-RAW_OPTION_MARKER = re.compile(r"\[\s*\<\s*\$\s*\>\s*\]\s*")
+
 
 # ============= TIỆN ÍCH PHÂN TÍCH WORD =============
 def remove_marker_text(s: str, trim: bool=False) -> str:
     t = RAW_OPTION_MARKER.sub("", s or "").replace("[<$>]", "")
     return t.strip() if trim else t
 
-def parse_question_header(text: str):
+def parse_question_header(text: str) -> Tuple[Optional[int], Dict[str, str], Optional[str]]:
+    """
+    Phân tích tiêu đề câu hỏi hỗ trợ metadata mở rộng.
+    Cú pháp: Câu 1 [<ID> <DIFF> <CHƯƠNG> <CHỦ ĐỀ>] Nội dung...
+    Hoặc rút gọn: Câu 1 [Dễ] Nội dung...
+    """
     m = QUESTION_HEADER_PAT.match((text or "").strip())
-    if not m: return None, None, None
-    qid, diff_code, stem = m.groups()
-    return int(qid), diff_code, (stem or "").strip()
+    if not m: return None, {}, None
+    
+    qid_str, meta_str, stem = m.groups()
+    meta = {"diff": "", "chapter": "", "topic": ""}
+    
+    if meta_str:
+        # Tách các thẻ bằng dấu cách, dấu phẩy hoặc dấu chấm phẩy
+        parts = re.split(r'[\s,;]+', meta_str.strip())
+        
+        # Logic nhận diện thông minh:
+        # 1. Nếu phần tử bắt đầu bằng C hoặc CH -> Chương (Chapter)
+        # 2. Nếu là Mức 1..4 hoặc Dễ/TB/Khó -> Độ khó (Diff)
+        # 3. Còn lại -> Topic hoặc dùng theo thứ tự ưu tiên
+        
+        for p in parts:
+            p_upper = p.upper()
+            if re.match(r'^(CH|C)\d+$', p_upper):
+                meta["chapter"] = p_upper
+            elif p_upper in ("DỄ", "TB", "KHÓ", "KHO", "CỰC KHÓ") or re.match(r'^L\d+$', p_upper):
+                meta["diff"] = p_upper
+            else:
+                if not meta["topic"]: meta["topic"] = p
+                elif not meta["diff"]: meta["diff"] = p
+    
+    return int(qid_str), meta, (stem or "").strip()
+
 
 def get_spans_text_summary(spans: List[Dict[str, Any]]) -> str:
     """Trả về văn bản tổng hợp từ danh sách spans, hỗ trợ mô phỏng công thức OMML."""
